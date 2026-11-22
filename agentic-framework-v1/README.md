@@ -240,19 +240,16 @@ Expected response:
 
 A Python dictionary cannot be sent directly through a TCP socket:
 
-```text
-Python dict
-   ↓ json.dumps()
-JSON string
-   ↓ .encode()
-Bytes
-   ↓ TCP socket
-Network
-   ↓ .decode()
-JSON string
-   ↓ json.loads()
-Python dict
-```
+Python Object ───────────────────→ JSON String ───────────────────→ Bytes
+              json.dumps()                      .encode()
+              Serialization                     Encoding
+                                                                     |
+                                                                     |
+                                                                     | TCP Transfer
+                                                                     ↓
+Python Object ←─────────────────── JSON String ←─────────────────── Bytes
+              json.loads()                       .decode()
+              Deserialization                    Decoding```
 
 In the supplied implementation, the result is transmitted using the same mechanism in the reverse direction.
 
