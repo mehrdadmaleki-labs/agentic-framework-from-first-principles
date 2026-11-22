@@ -240,17 +240,24 @@ Expected response:
 
 A Python dictionary cannot be sent directly through a TCP socket:
 
-Python Object ───────────────────→ JSON String ───────────────────→ Bytes
-              json.dumps()                      .encode()
-              Serialization                     Encoding
-                                                                     |
-                                                                     |
-                                                                     | TCP Transfer
-                                                                     ↓
-Python Object ←─────────────────── JSON String ←─────────────────── Bytes
-              json.loads()                       .decode()
-              Deserialization                    Decoding```
+### Serialization, Encoding, Decoding, and Deserialization
 
+```mermaid
+flowchart TB
+    subgraph Encoding["Serialization and Encoding"]
+        direction LR
+        A["Python Object"] -->|"json.dumps() — Serialization"| B["JSON String"]
+        B -->|".encode() — Encoding"| C["Bytes"]
+    end
+
+    C -->|"TCP Transfer"| D
+
+    subgraph Decoding["Decoding and Deserialization"]
+        direction RL
+        D["Bytes"] -->|".decode() — Decoding"| E["JSON String"]
+        E -->|"json.loads() — Deserialization"| F["Python Object"]
+    end
+```
 In the supplied implementation, the result is transmitted using the same mechanism in the reverse direction.
 
 ### What does `sendall()` guarantee?
