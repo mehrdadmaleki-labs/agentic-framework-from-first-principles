@@ -1,0 +1,82 @@
+
+import json
+import time
+
+
+def operation(x: float, y: float, op: str) -> float:
+    if op == "ADD":
+        return x + y
+
+    elif op == "SUBTRACT":
+        return x - y
+
+    elif op == "MULTIPLY":
+        return x * y
+
+    elif op == "DIVISION":
+        if y == 0:
+            raise ValueError("Denominator in division is zero")
+        return x / y
+
+    else:
+        raise ValueError(f"The operation {op} is not supported")
+
+
+def handle_client(conn, addr):
+    # Automatically close the connection when finished
+    with conn:
+        try:
+            buffer = b""
+
+            # Read until a complete message arrives
+            while True:
+                chunk = conn.recv(1024)
+
+                if not chunk:
+                    raise ConnectionError(
+                        "Client disconnected before completing request"
+                    )
+
+                buffer += chunk
+
+                if b"\n" in buffer:
+                    break
+
+            # Extract the complete JSON message
+            message = buffer.split(b"\n", 1)[0]
+
+            # Bytes -> String -> Python dictionary
+            data_obj = json.loads(message.decode("utf-8"))
+
+            # Simulate a slow operation (for concurrency testing)
+            time.sleep(5)
+
+            # Execute the requested operation
+            result = operation(**data_obj)
+
+            response = {
+                "status": "success",
+                "message": result
+            }
+
+        except (ValueError, TypeError) as e:
+            response = {
+                "status": "error",
+                "message": str(e)
+            }
+
+        except ConnectionError as e:
+            print(f"Connection error from {addr}: {e}")
+            return
+
+        # Python dictionary -> JSON string -> Bytes
+        response_bytes = (
+            json.dumps(response) + "\n"
+        ).encode("utf-8")
+
+        # Send the complete response
+        try:
+            conn.sendall(response_bytes)
+
+        except OSError as e:
+            print(f"Failed to send response to {addr}: {e}")
