@@ -1,6 +1,7 @@
 
 import json
 import time
+import asyncio
 
 
 def operation(x: float, y: float, op: str) -> float:
@@ -80,3 +81,56 @@ def handle_client(conn, addr):
 
         except OSError as e:
             print(f"Failed to send response to {addr}: {e}")
+
+async def handle_client(reader, writer):
+
+    addr = writer.get_extra_info("peername")
+    print("Agent connected:", addr)
+
+    try:
+        # Read until newline is received
+        data = await reader.readline()
+
+        if not data:
+            raise ConnectionError("Client disconnected")
+
+        # Bytes -> String -> Python dictionary
+        data_obj = json.loads(data.decode("utf-8"))
+
+        # Simulate a slow operation
+        await asyncio.sleep(5)
+
+        # Execute requested operation
+        result = operation(**data_obj)
+
+        response = {
+            "status": "success",
+            "message": result
+        }
+
+    except (ValueError, TypeError) as e:
+        response = {
+            "status": "error",
+            "message": str(e)
+        }
+
+    except ConnectionError as e:
+        print("Connection error:", e)
+        return
+
+    finally:
+        # Connection cleanup is handled below
+        pass
+
+    response_bytes = (
+        json.dumps(response) + "\n"
+    ).encode("utf-8")
+
+    try:
+        writer.write(response_bytes)
+        await writer.drain()
+
+    finally:
+        writer.close()
+        await writer.wait_closed()
+

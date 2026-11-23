@@ -1,29 +1,46 @@
-# V3 — Concurrent TCP Agents with Python Threads
+# V3 — Concurrent TCP Agents: Threading vs Asyncio
 
-V3 extends the newline-delimited JSON protocol from V2 so **Agent B can serve multiple independent clients at the same time**. Each incoming TCP connection gets its own thread.
+V3 extends V2's **newline-delimited JSON over TCP** to support multiple independent clients. It contains **two server implementations** of the same calculator protocol: one using Python threads, the other using `asyncio`. Both reuse the handlers and arithmetic operations in `tools.py`.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    A1["Agent A1<br/>agent_a1.py<br/>MULTIPLY"] <-->|"TCP · JSON + newline"| T1["Thread 1<br/>handle_client()"]
-    A2["Agent A2<br/>agent_a2.py<br/>ADD"] <-->|"TCP · JSON + newline"| T2["Thread 2<br/>handle_client()"]
-    subgraph B["Agent B — agent_b.py"]
-        direction TB
-        S["Main thread<br/>accept()"] -.->|starts| T1
-        S -.->|starts| T2
-    end
+flowchart TB
+    A1["Agent A1<br/>MULTIPLY"]
+    A2["Agent A2<br/>ADD"]
+    A1 -->|"TCP · JSON + newline"| B
+    A2 -->|"TCP · JSON + newline"| B
+    B{"Choose one server<br/>port 9000"}
+    B --> T["agent_b.py<br/>thread per client"]
+    B --> E["agent_b_async.py<br/>event loop / task per client"]
+    T --> H["tools.handle_client()"]
+    E --> AH["tools.handle_client_async()"]
+    H --> O["tools.operation()"]
+    AH --> O
+```
+
+**Only one server runs at a time**, because both listen on `127.0.0.1:9000`. Both return a JSON response followed by `\n` on the same client connection.
+
+## Files
+
+```text
+agentic-framework-v3/
+├── agent_a1.py         # Client 1: MULTIPLY (5 × 70)
+├── agent_a2.py         # Client 2: ADD (5 + 70)
+├── agent_b.py          # Threaded server: threading.Thread per connection
+├── agent_b_async.py    # Async server: asyncio.start_server()
+├── tools.py            # operation(), handle_client(), handle_client_async()
+└── README.md
 ```
 
 ## How it works
 
-1. **Agent B** listens on `127.0.0.1:9000` and accepts TCP connections.
-2. For each connection, `threading.Thread(target=handle_client, args=(conn, addr)).start()` launches a handler.
-3. The handler accumulates bytes until `\n`, then decodes JSON and calls `operation()` from `tools.py`.
-4. It sends a JSON result followed by `\n` and closes that client connection.
-5. **Agent A1** requests `MULTIPLY` (`5 × 70`); **Agent A2** requests `ADD` (`5 + 70`). They run as separate processes with separate sockets.
+1. **Agent A1** and **Agent A2** establish independent TCP connections and send JSON requests terminated with `\n`.
+2. **Threaded server:** `agent_b.py` accepts connections and starts a thread running `handle_client(conn, addr)` from `tools.py`. The handler collects bytes until `\n`.
+3. **Async server:** `agent_b_async.py` uses `asyncio.start_server(handle_client_async, ...)`. The coroutine in `tools.py` receives data using `await reader.readline()`; while awaiting I/O, the event loop can run other client tasks.
+4. Both handlers decode JSON, call the shared `operation()` function, and return newline-terminated JSON.
 
-**Example responses**
+Example responses:
 
 ```json
 {"status": "success", "message": 350}
@@ -33,39 +50,37 @@ flowchart LR
 {"status": "success", "message": 75}
 ```
 
-## Files
-
-```text
-agentic-framework-v3/
-├── agent_a1.py   # Client 1: MULTIPLY
-├── agent_a2.py   # Client 2: ADD
-├── agent_b.py    # TCP server: accept connections and start threads
-├── tools.py      # operation() and handle_client()
-└── README.md
-```
-
 ## Run
 
-Start the server in one terminal:
+**Option A — multithreaded server:**
 
 ```bash
 python agent_b.py
 ```
 
-From another terminal, launch both clients **at nearly the same time** (macOS/Linux):
+**Option B — asyncio server (stop Option A first):**
+
+```bash
+python agent_b_async.py
+```
+
+In another terminal, launch both existing clients together (macOS/Linux):
 
 ```bash
 python agent_a1.py & python agent_a2.py & wait
 ```
 
-To observe concurrency, temporarily add `time.sleep(5)` inside `handle_client()` before executing the operation. Two requests should finish in **about 5 seconds total**, rather than 10 seconds when processed sequentially.
+To visualize overlapping work, put `time.sleep(5)` in the threaded handler or `await asyncio.sleep(5)` in the async handler **before** `operation()`. Two near-simultaneous requests should complete in about **5 seconds total**, not 10. Remove the delay after testing.
 
-## What V3 demonstrates
+## Threading vs Asyncio
 
-- **Concurrency:** a waiting client does not prevent another thread from being handled.
-- **Isolation:** each client has its own connection; each server handler closes its socket with `with conn:`.
-- **Framing:** TCP is a byte stream, so `\n` marks the end of each JSON message.
+| Threading (`agent_b.py`) | Asyncio (`agent_b_async.py`) |
+|---|---|
+| One OS thread per client | One event-loop task per client |
+| `conn.recv()` blocks that client thread | `await reader.readline()` suspends that task |
+| `conn.sendall()` | `writer.write()` + `await writer.drain()` |
+| `time.sleep(5)` delays only its thread | `await asyncio.sleep(5)` lets other tasks run |
 
-**Limitations:** This version creates an unbounded thread per connection, has no connection timeout or message-size limit, and handles one request per connection. The clients should read the newline-terminated response with `readline()`, not assume a single `recv()` is complete.
+**Key idea:** Both approaches handle overlapping I/O. Neither automatically makes CPU-heavy Python calculations parallel.
 
-**Next:** V4 — replace per-client threads with `asyncio` and an event loop.
+**Current limitations:** One request per connection; no connection timeout, maximum message-size limit, or graceful shutdown logic. The threaded server also creates an unbounded number of threads. These are educational examples, not production servers.
