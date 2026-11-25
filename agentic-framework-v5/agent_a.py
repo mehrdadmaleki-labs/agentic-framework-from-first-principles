@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 agent_b_url = os.getenv("AGENT_B_URL")
+agent_c_url = os.getenv("AGENT_C_URL")
 
 app = FastAPI()
 
@@ -18,62 +19,45 @@ class TaskRequest(BaseModel):
     op: str
 
 
-@app.post("/task")
-async def execute_task(data: TaskRequest):
+@app.post("/analyze")
+async def analyze(data: TaskRequest):
 
-    MAX_ATTEMPTS = 3
+    async with httpx.AsyncClient(timeout=15.0) as client:
 
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        # Step 1: Prepare Agent B's request data
+        data_b = data.model_dump()
 
-            for attempt in range(MAX_ATTEMPTS):
+        response_b1 =client.post(
+            agent_b_url,
+            json=data_b
+            )
 
-                try:
-                    response = await client.post(
-                        agent_b_url,
-                        json=data.model_dump()
-                    )
-
-                    response.raise_for_status()
-                    return response.json()
-
-                except httpx.ConnectError:
-
-                    # Step 1: Check whether this was the final attempt.
-
-                    # Step 2: If final, raise HTTPException(503).
-                    if attempt == MAX_ATTEMPTS - 1 :
-                        raise HTTPException(503, "Agent B is not available")
+        # Step 2: Prepare Agent C's request data
+        data_c = data.model_dump()
+        data_c.pop("op")
+        response_c1 = client.post(
+            agent_c_url,
+            json=data_c
+            )
                 
-                    delay = 2 ** attempt
 
-                    print(f"Attempt {attempt + 1} failed. Retrying in {delay}s")
-                    
-                    await asyncio.sleep(delay)
-            
 
-                    # Step 3: Otherwise calculate the delay:
-                    # delay = 2 ** attempt
+        # Step 3: Call B and C concurrently
+        # Hint: asyncio.gather(...)
+        response_b, response_c = await asyncio.gather(
+            response_b1,
+            response_c1
+        )
 
-                    # Step 4: Wait asynchronously:
-                    # await asyncio.sleep(delay)
-            
+        # Step 4: Check both HTTP status codes
+        response_b.raise_for_status()
+        response_c.raise_for_status()
+        # Step 5: Deserialize both responses
+        return_b=response_b.json()
+        return_c=response_c.json()
 
-    except httpx.TimeoutException:
-        # Challenge 2:
-        # Raise HTTPException with status_code=504
-        # detail="Agent B response timed out"
-        raise HTTPException(
-                    status_code=504,
-                    detail="Agent B response timed out"
-                )
-        
-
-    except httpx.HTTPStatusError as e:
-        # Challenge 3:
-        # Return an appropriate HTTP error
-        # using e.response.status_code
-        raise HTTPException(
-                    status_code=e.response.status_code,
-                    detail=e.response.text
-                )
+        # Step 6: Return the combined result
+        return {
+            "calculation":return_b, 
+            "statistics": return_c
+            }
