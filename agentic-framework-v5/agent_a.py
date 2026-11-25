@@ -1,5 +1,6 @@
 import httpx
 from fastapi import FastAPI, HTTPException
+import asyncio
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
@@ -20,27 +21,43 @@ class TaskRequest(BaseModel):
 @app.post("/task")
 async def execute_task(data: TaskRequest):
 
+    MAX_ATTEMPTS = 3
+
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
 
-            response = await client.post(
-                agent_b_url,
-                json=data.model_dump()
-            )
+            for attempt in range(MAX_ATTEMPTS):
 
-            response.raise_for_status()
+                try:
+                    response = await client.post(
+                        agent_b_url,
+                        json=data.model_dump()
+                    )
 
-            return response.json()
+                    response.raise_for_status()
+                    return response.json()
 
-    except httpx.ConnectError:
-        # Challenge 1:
-        # Raise HTTPException with status_code=503
-        # detail="Agent B is unavailable"
-        raise HTTPException(
-            status_code=503,
-            detail="Agent B is unavailable"
-        )
-        
+                except httpx.ConnectError:
+
+                    # Step 1: Check whether this was the final attempt.
+
+                    # Step 2: If final, raise HTTPException(503).
+                    if attempt == MAX_ATTEMPTS - 1 :
+                        raise HTTPException(503, "Agent B is not available")
+                
+                    delay = 2 ** attempt
+
+                    print(f"Attempt {attempt + 1} failed. Retrying in {delay}s")
+                    
+                    await asyncio.sleep(delay)
+            
+
+                    # Step 3: Otherwise calculate the delay:
+                    # delay = 2 ** attempt
+
+                    # Step 4: Wait asynchronously:
+                    # await asyncio.sleep(delay)
+            
 
     except httpx.TimeoutException:
         # Challenge 2:
