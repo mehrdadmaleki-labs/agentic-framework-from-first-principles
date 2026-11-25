@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from tools import operation
 
@@ -14,9 +14,16 @@ class CalculationRequest(BaseModel):
 @app.post("/calculate")
 async def calculate(data: CalculationRequest):
 
-    result = operation(data.x, data.y, data.op)
+    try: 
 
-    return {
-        "status": "success",
-        "message": result
-    }
+        result = operation(data.x, data.y, data.op)
+
+        return {
+            "status": "success",
+            "message": result
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e)
+        )
