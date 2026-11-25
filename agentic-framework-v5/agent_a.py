@@ -46,18 +46,34 @@ async def analyze(data: TaskRequest):
         # Hint: asyncio.gather(...)
         response_b, response_c = await asyncio.gather(
             response_b1,
-            response_c1
+            response_c1,
+            return_exceptions=True
         )
 
-        # Step 4: Check both HTTP status codes
-        response_b.raise_for_status()
-        response_c.raise_for_status()
-        # Step 5: Deserialize both responses
-        return_b=response_b.json()
-        return_c=response_c.json()
+        def process_agent_response(response):
+
+            # Connection or timeout error
+            if isinstance(response, Exception):
+                return {
+                    "status": "error",
+                    "type": type(response).__name__,
+                    "message": str(response)
+                }
+
+            # HTTP error
+            if response.is_error:
+                return {
+                    "status": "error",
+                    "http_status": response.status_code,
+                    "message": response.text
+                }
+
+            # Successful response
+            return response.json()
+            
 
         # Step 6: Return the combined result
         return {
-            "calculation":return_b, 
-            "statistics": return_c
+            "calculation":process_agent_response(response_b), 
+            "statistics": process_agent_response(response_c)
             }
